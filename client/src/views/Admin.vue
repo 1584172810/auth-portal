@@ -44,9 +44,9 @@
             </tr></thead>
             <tbody>
               <tr v-for="u in users" :key="u.id">
-                <td>{{ u.id }}</td>
-                <td>{{ u.username }}</td>
-                <td>
+                <td data-label="ID">{{ u.id }}</td>
+                <td data-label="用户名">{{ u.username }}</td>
+                <td data-label="角色">
                   <span v-if="isAdmin && u.username !== 'admin'" class="role-select-wrap">
                     <select v-model="u.role" @change="changeRole(u)" class="role-select">
                       <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] || r }}</option>
@@ -54,8 +54,8 @@
                   </span>
                   <span v-else class="role-name">{{ roleLabels[u.role] || u.role }}</span>
                 </td>
-                <td>{{ u.created_at }}</td>
-                <td v-if="isAdmin" class="actions">
+                <td data-label="时间">{{ u.created_at }}</td>
+                <td v-if="isAdmin" data-label="操作" class="actions">
                   <button class="btn-sm btn-warning" @click="resetPw(u)">重置密码</button>
                   <button v-if="u.username !== 'admin'" class="btn-sm btn-danger" @click="deleteUser(u)">删除</button>
                 </td>
@@ -231,6 +231,34 @@ select.input-sm { cursor: pointer; min-width: 100px; }
 .btn-danger:hover { background: rgba(255,107,107,0.3); }
 .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--input-border); }
 .btn-ghost:hover { background: var(--card-bg); }
+
+@media (max-width: 768px) {
+  .admin-page { padding: 12px; }
+  .top-bar { flex-wrap: wrap; gap: 8px; }
+  .top-bar .theme-picker { margin-left: 0; order: 10; width: 100%; justify-content: center; }
+  .tl { display: none; }
+  .tabs { gap: 4px; }
+  .tab { padding: 8px 12px; font-size: 13px; }
+  .card { padding: 16px; }
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; }
+  .table tr { padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; }
+  .table td { padding: 6px 0; border: none; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .table td::before { content: attr(data-label); color: var(--text-muted); font-size: 12px; font-weight: 500; }
+  .actions { justify-content: flex-end; }
+  .form-inline { flex-direction: column; }
+  .form-inline .input-sm { min-width: auto; width: 100%; }
+  .token-card { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .token-code { width: 100%; word-break: break-all; }
+  .token-card-actions { width: 100%; justify-content: flex-end; }
+}
+
+@media (max-width: 480px) {
+  .card { padding: 12px; border-radius: 12px; }
+  .card-header h2 { font-size: 16px; }
+  .tabs { overflow-x: auto; white-space: nowrap; padding-bottom: 4px; }
+  .tab { flex-shrink: 0; }
+}
 .msg { font-size: 13px; margin: 0 0 12px; }
 .error { color: var(--danger); } .success { color: var(--success); }
 .token-display { margin: 16px 0; }

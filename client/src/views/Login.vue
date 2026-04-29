@@ -57,4 +57,12 @@ h1 { color: var(--text-primary); font-size: 28px; margin: 0 0 4px; font-weight: 
 .btn-primary { width: 100%; padding: 14px; border: none; border-radius: 12px; background: var(--accent); color: var(--btn-text); font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
 .btn-primary:hover:not(:disabled) { opacity: 0.9; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 480px) {
+  .login-card { padding: 36px 24px; max-width: 95vw; }
+  .logo { font-size: 48px; }
+  h1 { font-size: 24px; }
+  .field input { padding: 12px 14px; font-size: 16px; }
+  .btn-primary { padding: 12px; font-size: 15px; }
+}
 </style>

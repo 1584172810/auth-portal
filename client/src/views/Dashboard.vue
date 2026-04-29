@@ -129,4 +129,17 @@ h1 { color: var(--text-primary); font-size: 30px; font-weight: 700; margin: 8px 
   transition: all 0.2s;
 }
 .btn-logout:hover { background: rgba(255,107,107,0.2); transform: translateY(-1px); }
+
+@media (max-width: 600px) {
+  .logo { font-size: 56px; }
+  h1 { font-size: 24px; }
+  .greeting { margin-bottom: 32px; }
+  .button-row { flex-direction: column; gap: 16px; align-items: center; }
+  .btn-entry { width: 200px; height: 120px; }
+  .btn-icon { font-size: 32px; }
+  .theme-picker { top: 12px; right: 12px; }
+  .theme-btn { padding: 6px 8px; }
+  .theme-label { display: none; }
+  .btn-logout { bottom: 16px; right: 16px; padding: 8px 16px; }
+}
 </style>

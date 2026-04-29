@@ -118,4 +118,10 @@ onMounted(() => { if (props.tab === 'devices') loadDevices(); });
 .btn-remove:hover { background: rgba(255, 107, 107, 0.22); }
 .loading-text { color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px; }
 .error-text { color: var(--danger); font-size: 13px; }
+
+@media (max-width: 600px) {
+  .device-card { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .device-info { flex-wrap: wrap; }
+  .device-info .btn-sm { align-self: flex-end; }
+}
 </style>
