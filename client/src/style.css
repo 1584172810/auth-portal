@@ -1,0 +1,98 @@
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== 赛博极光（默认） ===== */
+:root, [data-theme="aurora"] {
+  --page-bg: #0a0b1e;
+  --card-bg: rgba(18, 20, 42, 0.92);
+  --card-border: rgba(0, 255, 200, 0.12);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 255, 200, 0.04);
+  --text-primary: #d0f0ec;
+  --text-secondary: rgba(160, 220, 210, 0.55);
+  --text-muted: rgba(120, 200, 190, 0.35);
+  --accent: #00d4b0;
+  --accent-glow: 0 0 24px rgba(0, 212, 176, 0.35);
+  --gradient-bg: linear-gradient(135deg, #0a0b1e 0%, #111638 50%, #0a0b1e 100%);
+  --input-bg: rgba(0, 212, 176, 0.05);
+  --input-border: rgba(0, 212, 176, 0.15);
+  --input-focus-border: #00d4b0;
+  --danger: #ff5470;
+  --success: #60e6c0;
+  --warning: #ffbd59;
+  --btn-text: #0a0b1e;
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --badge-bg: rgba(0, 212, 176, 0.18);
+  --badge-text: #60e6c0;
+  --tab-hover: rgba(0, 212, 176, 0.06);
+  --btn-ghost-hover: rgba(0, 212, 176, 0.08);
+}
+
+/* ===== 日落海岸 ===== */
+[data-theme="sunset"] {
+  --page-bg: #1a1018;
+  --card-bg: rgba(35, 20, 30, 0.92);
+  --card-border: rgba(255, 150, 100, 0.15);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 150, 100, 0.05);
+  --text-primary: #f0ddd0;
+  --text-secondary: rgba(220, 180, 160, 0.55);
+  --text-muted: rgba(200, 160, 140, 0.35);
+  --accent: #ff7e5f;
+  --accent-glow: 0 0 24px rgba(255, 126, 95, 0.3);
+  --gradient-bg: linear-gradient(135deg, #1a1018 0%, #2e1820 50%, #1a1018 100%);
+  --input-bg: rgba(255, 126, 95, 0.06);
+  --input-border: rgba(255, 126, 95, 0.15);
+  --input-focus-border: #ff7e5f;
+  --danger: #ff6b6b;
+  --success: #7ed4ad;
+  --warning: #fbbf24;
+  --btn-text: #1a1018;
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --badge-bg: rgba(255, 126, 95, 0.18);
+  --badge-text: #ffa58a;
+  --tab-hover: rgba(255, 126, 95, 0.06);
+  --btn-ghost-hover: rgba(255, 126, 95, 0.08);
+}
+
+/* ===== 森林晨露 ===== */
+[data-theme="forest"] {
+  --page-bg: #0d1f12;
+  --card-bg: rgba(18, 40, 25, 0.92);
+  --card-border: rgba(100, 210, 130, 0.12);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(100, 210, 130, 0.04);
+  --text-primary: #d0e8d4;
+  --text-secondary: rgba(160, 210, 170, 0.55);
+  --text-muted: rgba(130, 190, 140, 0.35);
+  --accent: #64d482;
+  --accent-glow: 0 0 24px rgba(100, 212, 130, 0.25);
+  --gradient-bg: linear-gradient(135deg, #0d1f12 0%, #122a18 50%, #0d1f12 100%);
+  --input-bg: rgba(100, 212, 130, 0.05);
+  --input-border: rgba(100, 212, 130, 0.15);
+  --input-focus-border: #64d482;
+  --danger: #ff6b6b;
+  --success: #7ed4ad;
+  --warning: #fbbf24;
+  --btn-text: #0d1f12;
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+  --badge-bg: rgba(100, 212, 130, 0.18);
+  --badge-text: #90e0a0;
+  --tab-hover: rgba(100, 212, 130, 0.06);
+  --btn-ghost-hover: rgba(100, 212, 130, 0.08);
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-primary);
+  transition: background 0.4s ease, color 0.3s ease;
+}
+
+a { color: inherit; text-decoration: none; }
+input::placeholder { color: var(--text-muted); }

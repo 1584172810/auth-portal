@@ -1,0 +1,10 @@
+node_modules/
+client/dist/
+*.db
+*.db-journal
+portal-device-id.json
+.vscode/
+.DS_Store
+*.bak
+*.bak2
+*.bak3
