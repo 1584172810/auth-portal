@@ -1,77 +1,107 @@
 <template>
   <div class="chat-page">
-    <!-- Header -->
-    <div class="chat-header">
-      <button @click="goBack" class="btn-back">← 返回</button>
-      <span class="chat-title">💬 OpenClaw 对话</span>
-      <span class="chat-user">{{ auth.user }}</span>
+    <!-- Sidebar -->
+    <div class="sidebar" :class="{ 'sidebar-open': sidebarOpen }">
+      <div class="sidebar-header">
+        <span class="sidebar-title">💬 对话历史</span>
+        <button class="btn-sidebar-close" @click="sidebarOpen = false">✕</button>
+      </div>
+      <button class="btn-new-chat" @click="newSession">＋ 新对话</button>
+      <div class="session-list" v-if="sessions.length">
+        <div v-for="s in sessions" :key="s.id"
+          :class="['session-item', { active: currentSessionId === s.id }]"
+          @click="switchSession(s.id)">
+          <div class="session-title">{{ s.title }}</div>
+          <div class="session-meta">{{ formatTime(s.updated) }}</div>
+          <button class="btn-del-session" @click.stop="deleteSession(s.id)" title="删除对话">✕</button>
+        </div>
+      </div>
+      <div v-else class="sidebar-empty">暂无对话记录</div>
     </div>
+    <!-- Overlay for mobile sidebar -->
+    <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
 
-    <!-- Messages -->
-    <div class="messages" ref="msgContainer">
-      <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role === 'user' ? 'msg-user' : 'msg-assistant', { 'msg-streaming': m.streaming }]">
-        <div class="msg-role">{{ m.role === 'user' ? '你' : '小爪' }}</div>
-        <!-- Files preview in user messages -->
-        <div v-if="m.files && m.files.length" class="msg-files">
-          <div v-for="(f, fi) in m.files" :key="fi" class="file-chip">
-            <img v-if="isImage(f.mimetype)" :src="f.url" class="file-img" @click="previewImg(f.url)" />
-            <span v-else class="file-icon">📎</span>
-            <a :href="f.url" target="_blank" class="file-name">{{ f.originalName }}</a>
-            <span class="file-size">{{ formatSize(f.size) }}</span>
+    <!-- Main chat area -->
+    <div class="chat-main">
+      <!-- Header -->
+      <div class="chat-header">
+        <button @click="sidebarOpen = true" class="btn-sidebar-toggle">☰</button>
+        <button @click="goBack" class="btn-back">← 返回</button>
+        <span class="chat-title">{{ currentSessionTitle }}</span>
+        <span class="chat-user">{{ auth.user }}</span>
+      </div>
+
+      <!-- Messages -->
+      <div class="messages" ref="msgContainer">
+        <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role === 'user' ? 'msg-user' : 'msg-assistant', { 'msg-streaming': m.streaming }]">
+          <div class="msg-role">{{ m.role === 'user' ? '你' : '小爪' }}</div>
+          <!-- Files preview in messages -->
+          <div v-if="m.files && m.files.length" class="msg-files">
+            <div v-for="(f, fi) in m.files" :key="fi" class="file-chip">
+              <img v-if="isImage(f.mimetype)" :src="f.url" class="file-img" @click="previewImg(f.url)" />
+              <span v-else class="file-icon">📎</span>
+              <a :href="f.url" target="_blank" class="file-name">{{ f.originalName }}</a>
+              <span class="file-size">{{ formatSize(f.size) }}</span>
+            </div>
+          </div>
+          <div class="msg-text" v-html="renderText(m.text)"></div>
+        </div>
+        <!-- Loading indicator -->
+        <div v-if="loadingHistory" class="connecting">
+          <div class="spinner"></div>
+          <span>加载历史记录...</span>
+        </div>
+        <!-- Uploading indicator -->
+        <div v-if="uploading" class="msg msg-assistant uploading-indicator">
+          <div class="uploading-bar">
+            <span class="upload-spinner"></span>
+            <span>上传文件中 ({{ uploadProgress }})...</span>
           </div>
         </div>
-        <div class="msg-text" v-html="renderText(m.text)"></div>
-      </div>
-      <!-- Uploading indicator -->
-      <div v-if="uploading" class="msg msg-assistant uploading-indicator">
-        <div class="uploading-bar">
-          <span class="upload-spinner"></span>
-          <span>上传文件中 ({{ uploadProgress }})...</span>
+        <div v-if="connecting && !messages.length" class="connecting">
+          <div class="spinner"></div>
+          <span>连接中...</span>
+        </div>
+        <div v-if="!connecting && !loadingHistory && !messages.length" class="empty">
+          开始对话吧 ✍️
         </div>
       </div>
-      <div v-if="connecting && !messages.length" class="connecting">
-        <div class="spinner"></div>
-        <span>连接中...</span>
-      </div>
-      <div v-if="!connecting && !messages.length" class="empty">
-        开始对话吧 ✍️
-      </div>
-    </div>
 
-    <!-- Input -->
-    <div class="input-bar">
-      <label class="btn-file" :class="{ 'btn-file-disabled': sending || uploading }">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-        </svg>
-        <input type="file" multiple @change="onFileSelected" ref="fileInput" accept="*/*" />
-      </label>
-      <div v-if="selectedFiles.length" class="file-badge" @click="clearFiles">
-        {{ selectedFiles.length }} 个文件 ✕
+      <!-- Input -->
+      <div class="input-bar">
+        <label class="btn-file" :class="{ 'btn-file-disabled': sending || uploading }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+          </svg>
+          <input type="file" multiple @change="onFileSelected" ref="fileInput" accept="*/*" />
+        </label>
+        <div v-if="selectedFiles.length" class="file-badge" @click="clearFiles">
+          {{ selectedFiles.length }} 个文件 ✕
+        </div>
+        <textarea
+          v-model="inputText"
+          @keydown.enter.exact="sendMessage"
+          :disabled="sending || uploading"
+          placeholder="输入消息... (Enter 发送)"
+          rows="1"
+          ref="inputEl"
+          class="msg-input"
+        ></textarea>
+        <button @click="sendMessage" :disabled="sending || uploading || (!inputText.trim() && !selectedFiles.length) || !connected" class="btn-send">
+          {{ sending ? '...' : '发送' }}
+        </button>
       </div>
-      <textarea
-        v-model="inputText"
-        @keydown.enter.exact="sendMessage"
-        :disabled="sending || uploading"
-        placeholder="输入消息... (Enter 发送)"
-        rows="1"
-        ref="inputEl"
-        class="msg-input"
-      ></textarea>
-      <button @click="sendMessage" :disabled="sending || uploading || (!inputText.trim() && !selectedFiles.length) || !connected" class="btn-send">
-        {{ sending ? '...' : '发送' }}
-      </button>
+
+      <!-- Status bar -->
+      <div class="status-bar" :class="{ 'status-err': !connected }">
+        {{ connected ? (uploading ? '上传中...' : (sending ? '回复中...' : '已连接')) : (connecting ? '连接中...' : '连接断开') }}
+      </div>
     </div>
 
     <!-- Image preview modal -->
     <div v-if="previewUrl" class="preview-overlay" @click="previewUrl = ''">
       <img :src="previewUrl" class="preview-img" />
       <span class="preview-close">✕</span>
-    </div>
-
-    <!-- Status bar -->
-    <div class="status-bar" :class="{ 'status-err': !connected }">
-      {{ connected ? (uploading ? '上传中...' : (sending ? '回复中...' : '已连接')) : (connecting ? '连接中...' : '连接断开') }}
     </div>
   </div>
 </template>
@@ -93,6 +123,11 @@ const uploading = ref(false);
 const uploadProgress = ref('');
 const selectedFiles = ref([]);
 const previewUrl = ref('');
+const sidebarOpen = ref(false);
+const sessions = ref([]);
+const currentSessionId = ref(null);
+const currentSessionTitle = ref('新对话');
+const loadingHistory = ref(false);
 
 let ws = null;
 let reqId = 0;
@@ -107,6 +142,17 @@ function formatSize(bytes) {
   if (bytes < 1024) return bytes + 'B';
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'KB';
   return (bytes / 1048576).toFixed(1) + 'MB';
+}
+
+function formatTime(t) {
+  if (!t) return '';
+  const d = new Date(t + 'Z');
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+  return d.toLocaleDateString('zh-CN');
 }
 
 function previewImg(url) { previewUrl.value = url; }
@@ -129,14 +175,11 @@ function genUuid() {
 
 function renderText(text) {
   if (!text) return '';
-  // Convert URLs to clickable links
   let escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-  // Mark links
   escaped = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" class="msg-link">$1</a>');
-  // Convert newlines
   escaped = escaped.replace(/\n/g, '<br>');
   return escaped;
 }
@@ -220,10 +263,117 @@ async function onFileSelected(e) {
   const files = e.target.files;
   if (!files.length) return;
   selectedFiles.value = Array.from(files);
-  // Clear the input so same file can be selected again
   e.target.value = '';
-  // Focus input for typing
   if (inputEl.value) inputEl.value.focus();
+}
+
+// --- Session API calls ---
+
+async function fetchSessions() {
+  try {
+    const res = await fetch('/api/chat-sessions');
+    const data = await res.json();
+    if (data.ok) {
+      sessions.value = data.sessions;
+    }
+  } catch (e) {
+    console.error('Failed to fetch sessions:', e);
+  }
+}
+
+async function createSession() {
+  if (!currentSessionId.value) {
+    // Create a session if none exists
+    try {
+      const res = await fetch('/api/chat-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: '新对话' })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        currentSessionId.value = data.session.id;
+        currentSessionTitle.value = '新对话';
+        await fetchSessions();
+      }
+    } catch (e) {
+      console.error('Failed to create session:', e);
+    }
+  }
+}
+
+async function saveMessageToSession(role, text, files) {
+  if (!currentSessionId.value) return;
+  try {
+    await fetch(`/api/chat-sessions/${currentSessionId.value}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, text, files })
+    });
+    await fetchSessions();
+  } catch (e) {
+    console.error('Failed to save message:', e);
+  }
+}
+
+async function deleteSession(id) {
+  if (!confirm('确定删除该对话吗？消息将永久丢失。')) return;
+  try {
+    const res = await fetch(`/api/chat-sessions/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) {
+      if (currentSessionId.value === id) {
+        currentSessionId.value = null;
+        currentSessionTitle.value = '新对话';
+        messages.value = [];
+      }
+      await fetchSessions();
+    }
+  } catch (e) {
+    console.error('Failed to delete session:', e);
+  }
+}
+
+async function loadSessionMessages(id) {
+  loadingHistory.value = true;
+  try {
+    const res = await fetch(`/api/chat-sessions/${id}`);
+    const data = await res.json();
+    if (data.ok) {
+      messages.value = data.messages.map(m => ({
+        role: m.role,
+        text: m.text || '',
+        streaming: false,
+        files: m.files ? JSON.parse(m.files) : []
+      }));
+      currentSessionTitle.value = data.session.title;
+      currentSessionId.value = data.session.id;
+      scrollBottom();
+    }
+  } catch (e) {
+    console.error('Failed to load messages:', e);
+  }
+  loadingHistory.value = false;
+}
+
+async function switchSession(id) {
+  if (ws) {
+    // Create a new GW session key for this chat session
+    sessionKey = 'portal-' + auth.user + '-' + id;
+  }
+  await loadSessionMessages(id);
+  sidebarOpen.value = false;
+}
+
+async function newSession() {
+  if (ws) {
+    sessionKey = 'portal-' + auth.user + '-' + Date.now();
+  }
+  currentSessionId.value = null;
+  currentSessionTitle.value = '新对话';
+  messages.value = [];
+  inputText.value = '';
+  selectedFiles.value = [];
 }
 
 async function sendMessage() {
@@ -232,6 +382,9 @@ async function sendMessage() {
 
   if ((!text && !files.length) || sending.value || uploading.value || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+  // Ensure we have a session
+  await createSession();
+
   // Upload files first
   let uploadedFiles = [];
   if (files.length) {
@@ -239,7 +392,6 @@ async function sendMessage() {
       uploadedFiles = await uploadFiles(files);
       selectedFiles.value = [];
     } catch (e) {
-      // Show error in chat
       addMessage('user', '', { files: files.map(f => ({
         originalName: f.name,
         size: f.size,
@@ -259,23 +411,17 @@ async function sendMessage() {
 
   // Build message
   let msgText = text;
-  let msgParts = [];
-
-  // Add file references
   if (uploadedFiles.length) {
     const fileLines = uploadedFiles.map(f => {
       const isImg = isImage(f.mimetype);
-      if (isImg) {
-        return `[图片: ${f.originalName}](${f.url})`;
-      } else {
-        return `[文件: ${f.originalName}](${f.url})`;
-      }
+      return isImg ? `[图片: ${f.originalName}](${f.url})` : `[文件: ${f.originalName}](${f.url})`;
     });
     msgText = msgText ? fileLines.join('\n') + '\n' + msgText : fileLines.join('\n');
-    // Also store file metadata for UI rendering
   }
 
   addMessage('user', msgText, { files: uploadedFiles });
+  saveMessageToSession('user', msgText, uploadedFiles);
+
   const streamMsg = findOrCreateStreamMsg();
 
   try {
@@ -291,8 +437,6 @@ async function sendMessage() {
       sending.value = false;
       return;
     }
-    // Wait for chat event to finish
-    return;
   } catch (e) {
     streamMsg.text = '发送失败: ' + e.message;
     streamMsg.streaming = false;
@@ -312,19 +456,21 @@ async function fetchHistory() {
   try {
     const res = await sendWS('chat.history', { sessionKey, limit: 50, maxChars: 5000 });
     if (res.ok && res.payload?.rows) {
-      messages.value = [];
-      for (const row of res.payload.rows) {
-        if (row.role === 'user' || row.role === 'assistant') {
-          if (row.role === 'assistant' && (!row.text || /^(NO_REPLY|no_reply)$/i.test(row.text.trim()))) continue;
-          messages.value.push({
-            role: row.role,
-            text: row.text || '',
-            streaming: false,
-            files: [],
-          });
+      // Don't replace messages if we already loaded from local session
+      if (messages.value.length === 0) {
+        for (const row of res.payload.rows) {
+          if (row.role === 'user' || row.role === 'assistant') {
+            if (row.role === 'assistant' && (!row.text || /^(NO_REPLY|no_reply)$/i.test(row.text.trim()))) continue;
+            messages.value.push({
+              role: row.role,
+              text: row.text || '',
+              streaming: false,
+              files: [],
+            });
+          }
         }
+        scrollBottom();
       }
-      scrollBottom();
     }
   } catch (e) {
     console.error('history fetch failed:', e);
@@ -346,11 +492,15 @@ function handleMessage(data) {
         }
       }
 
-      // First successful response = connected
       if (connecting.value && msg.ok) {
         connecting.value = false;
         connected.value = true;
-        setTimeout(fetchHistory, 100);
+        // Fetch sessions and load latest
+        fetchSessions().then(() => {
+          if (sessions.value.length > 0 && !currentSessionId.value) {
+            switchSession(sessions.value[0].id);
+          }
+        });
       }
     } else if (msg.type === 'event') {
       if (msg.event === 'chat') {
@@ -370,6 +520,7 @@ function handleMessage(data) {
           const sm = messages.value[messages.value.length - 1];
           if (sm && sm.streaming) {
             sm.streaming = false;
+            saveMessageToSession('assistant', sm.text, []);
           }
           sending.value = false;
           scrollBottom();
@@ -384,8 +535,6 @@ function handleMessage(data) {
           sm.text += p.text;
           scrollBottom();
         }
-      } else if (msg.event === 'agent') {
-        // agent lifecycle events - not needed for UI
       }
     }
   } catch (e) {
@@ -402,9 +551,7 @@ function connect() {
   connected.value = false;
 
   ws = new WebSocket(url);
-  ws.onopen = () => {
-    // Portal backend handles challenge and auth. Just wait for events.
-  };
+  ws.onopen = () => {};
 
   ws.onmessage = (evt) => {
     handleMessage(evt.data);
@@ -437,7 +584,7 @@ onMounted(async () => {
     window.location.href = '/login';
     return;
   }
-  sessionKey = 'portal-' + auth.user;
+  sessionKey = 'portal-' + auth.user + '-' + Date.now();
   connect();
 });
 
@@ -454,10 +601,92 @@ watch(messages, () => {
 <style scoped>
 .chat-page {
   display: flex;
-  flex-direction: column;
   height: 100vh;
   background: var(--page-bg);
   color: var(--text-primary);
+}
+
+/* === Sidebar === */
+.sidebar {
+  width: 260px;
+  background: var(--card-bg);
+  border-right: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: transform 0.25s ease;
+}
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--card-border);
+}
+.sidebar-title { font-size: 15px; font-weight: 600; }
+.btn-sidebar-close { display: none; background: none; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; padding: 4px; }
+.btn-new-chat {
+  margin: 10px 12px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--card-border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.btn-new-chat:hover { border-color: var(--accent); color: var(--text-primary); background: rgba(255,255,255,0.03); }
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+.session-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  margin-bottom: 2px;
+}
+.session-item:hover { background: rgba(255,255,255,0.05); }
+.session-item.active { background: rgba(255,255,255,0.08); border-left: 3px solid var(--accent); }
+.session-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.session-meta { font-size: 11px; color: var(--text-muted); }
+.btn-del-session {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.session-item:hover .btn-del-session { display: flex; }
+.btn-del-session:hover { background: rgba(255,84,112,0.15); color: var(--danger); }
+.sidebar-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.sidebar-overlay { display: none; }
+
+/* === Chat main === */
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .chat-header {
   display: flex;
@@ -468,6 +697,7 @@ watch(messages, () => {
   border-bottom: 1px solid var(--card-border);
   flex-shrink: 0;
 }
+.btn-sidebar-toggle { display: none; background: none; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; padding: 4px; }
 .btn-back {
   background: none;
   border: 1px solid var(--card-border);
@@ -479,8 +709,8 @@ watch(messages, () => {
   transition: all 0.2s;
 }
 .btn-back:hover { border-color: var(--accent); color: var(--text-primary); }
-.chat-title { font-size: 16px; font-weight: 600; flex: 1; }
-.chat-user { font-size: 13px; color: var(--text-secondary); background: var(--badge-bg); padding: 4px 10px; border-radius: 8px; }
+.chat-title { font-size: 16px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-user { font-size: 13px; color: var(--text-secondary); background: var(--badge-bg); padding: 4px 10px; border-radius: 8px; flex-shrink: 0; }
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -573,9 +803,7 @@ watch(messages, () => {
   color: var(--text-muted);
   flex-shrink: 0;
 }
-.uploading-indicator {
-  align-self: flex-start;
-}
+.uploading-indicator { align-self: flex-start; }
 .uploading-bar {
   display: flex;
   align-items: center;
@@ -661,7 +889,6 @@ watch(messages, () => {
 }
 .status-err { color: var(--danger); background: rgba(255,84,112,0.08); }
 
-/* Image preview overlay */
 .preview-overlay {
   position: fixed;
   inset: 0;
@@ -689,4 +916,26 @@ watch(messages, () => {
   transition: opacity 0.2s;
 }
 .preview-close:hover { opacity: 1; }
+
+/* === Responsive === */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+  }
+  .sidebar.sidebar-open { transform: translateX(0); }
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 99;
+  }
+  .btn-sidebar-toggle { display: block; }
+  .btn-sidebar-close { display: block; }
+}
 </style>

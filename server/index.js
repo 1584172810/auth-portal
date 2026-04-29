@@ -35,6 +35,8 @@ async function initDb() {
   db = new SQL.Database(buf);
   db.run('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT "user", theme TEXT DEFAULT "aurora")');
   db.run('CREATE TABLE IF NOT EXISTS tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, token TEXT, note TEXT, created TEXT DEFAULT (datetime("now")))');
+  db.run('CREATE TABLE IF NOT EXISTS chat_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, created TEXT, updated TEXT)');
+  db.run('CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, role TEXT, text TEXT, files TEXT, created TEXT)');
   if (!exists || !q1('SELECT id FROM users WHERE username = ?', ['admin'])) {
     const pw = bcrypt.hashSync('admin123', 10);
     db.run('INSERT OR IGNORE INTO users (username, password, role, theme) VALUES (?,?,?,?)', ['admin', pw, 'admin', 'aurora']);
@@ -76,6 +78,63 @@ app.get('/api/me',(req,res)=>{const u=tokUser(req);if(!u)return res.status(401).
 app.post('/api/theme',(req,res)=>{const u=tokUser(req);if(!u)return res.status(401).json({ok:false});const{theme}=req.body;if(!['dark','light','aurora','sunset','forest'].includes(theme))return res.status(400).json({ok:false});updateTheme(u.id,theme);res.json({ok:true})});
 app.post('/api/change-password',(req,res)=>{const tu=tokUser(req);if(!tu)return res.status(401).json({ok:false});const{currentPassword,newPassword}=req.body;if(!currentPassword||!newPassword||newPassword.length<6)return res.status(400).json({ok:false});const u=getUById(tu.id);if(!u||!bcrypt.compareSync(currentPassword,u.password))return res.status(401).json({ok:false});updatePw(u.id,bcrypt.hashSync(newPassword,10));res.json({ok:true})});
 
+
+// Chat session API
+function reqChat(req,res,next){const u=tokUser(req);if(!u)return res.status(401).json({ok:false});req.tokU=u;next()}
+function now(){return new Date().toISOString().replace('T',' ').split('.')[0]}
+
+app.get('/api/chat-sessions', reqChat, (req, res) => {
+  const s = all('SELECT id, title, created, updated FROM chat_sessions WHERE user_id = ? ORDER BY updated DESC', [req.tokU.id]);
+  res.json({ ok: true, sessions: s });
+});
+
+app.post('/api/chat-sessions', reqChat, (req, res) => {
+  const { title } = req.body;
+  const t = now();
+  run('INSERT INTO chat_sessions (user_id, title, created, updated) VALUES (?, ?, ?, ?)', [req.tokU.id, title || '新对话', t, t]);
+  const id = db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  const s = q1('SELECT id, title, created, updated FROM chat_sessions WHERE id = ?', [id]);
+  res.json({ ok: true, session: s });
+});
+
+app.get('/api/chat-sessions/:id', reqChat, (req, res) => {
+  const s = q1('SELECT id, user_id, title, created, updated FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const msgs = all('SELECT id, role, text, files, created FROM chat_messages WHERE session_id = ? ORDER BY id ASC', [req.params.id]);
+  res.json({ ok: true, session: s, messages: msgs });
+});
+
+app.post('/api/chat-sessions/:id/messages', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const { role, text, files } = req.body;
+  const t = now();
+  run('INSERT INTO chat_messages (session_id, role, text, files, created) VALUES (?, ?, ?, ?, ?)', [req.params.id, role, text || '', files ? JSON.stringify(files) : null, t]);
+  run('UPDATE chat_sessions SET updated = ? WHERE id = ?', [t, req.params.id]);
+  if (role === 'user' && (!s.title || s.title === '新对话') && text) {
+    const tt = text.length > 40 ? text.substring(0, 40) + '...' : text;
+    run('UPDATE chat_sessions SET title = ? WHERE id = ?', [tt.replace(/\n/g, ' '), req.params.id]);
+  }
+  const msg = q1('SELECT id, role, text, files, created FROM chat_messages WHERE id = last_insert_rowid()');
+  res.json({ ok: true, message: msg });
+});
+
+app.delete('/api/chat-sessions/:id', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  run('DELETE FROM chat_messages WHERE session_id = ?', [req.params.id]);
+  run('DELETE FROM chat_sessions WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/chat-sessions/:id/messages', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const t = now();
+  run('DELETE FROM chat_messages WHERE session_id = ?', [req.params.id]);
+  run('UPDATE chat_sessions SET title = ?, updated = ? WHERE id = ?', ['新对话', t, req.params.id]);
+  res.json({ ok: true });
+});
 
 // Static files
 // File upload
