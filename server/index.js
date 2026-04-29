@@ -78,6 +78,33 @@ app.post('/api/change-password',(req,res)=>{const tu=tokUser(req);if(!tu)return 
 
 
 // Static files
+// File upload
+import multer from 'multer';
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+});
+
+app.post('/api/upload', (req, res) => {
+  const u = tokUser(req);
+  if (!u) return res.status(401).json({ ok: false });
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) return res.status(400).json({ ok: false, error: err.message });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ ok: false, error: 'No files uploaded' });
+    const files = req.files.map(f => ({
+      originalName: f.originalname,
+      size: f.size,
+      mimetype: f.mimetype,
+      url: '/uploads/' + f.filename
+    }));
+    res.json({ ok: true, files });
+  });
+});
+
+app.use('/uploads', express.static(UPLOAD_DIR));
+
 app.use('/', express.static(path.join(__dirname, '../client/dist')));
 app.use('/portal-assets', express.static(path.join(__dirname, '../client/dist')));
 app.get('*', (req, res) => {
