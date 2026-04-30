@@ -1,4 +1,4 @@
-# Auth Portal — 架构与开发文档（v1）
+# Auth Portal — 架构与开发文档（v1.4）
 
 ## 项目概述
 
@@ -290,3 +290,82 @@ nohup node index.js > /tmp/auth-portal.log 2>&1 &
 1. 在 `client/src/style.css` 添加 CSS 变量组
 2. 在 `client/src/stores/auth.js` 的 `themes` 数组添加主题配置
 3. 主题 ID 需要在服务端 `/api/theme` 的白名单中注册
+
+
+---
+
+## v1.4 更新（2026-04-30）
+
+### 修复
+
+1. **移动端 Safari 登录失败**
+   - 根因：手机 Safari 自动升级 HTTP 到 HTTPS，自签名证书下跨协议 cookie/localStorage 隔离
+   - 修复：登录成功后强制跳转 http://117.72.200.3/，Nginx HTTPS 全部 302 重定向到 HTTP
+
+2. **登录永远返回 401**
+   - 根因：`if` 语句缺少花括号，`return res.status(401)` 始终执行
+   - 修复：login 路由中正确包裹 if 语句
+
+3. **用户管理页面空白**
+   - 根因：清理网关令牌代码时误删 `onMounted` 中的 `loadUsers()` 调用
+   - 修复：补上 `loadUsers()` 调用
+
+4. **用户列表缺少 `created` 字段**
+   - 根因：SQL 查询未 SELECT `created_at`
+   - 修复：增加 `created_at AS created`
+
+### 新增功能
+
+1. **Bearer Token 认证**
+   - 登录返回 `token` 字段，存入 `localStorage`
+   - 每次请求通过 axios interceptor 自动附加 `Authorization: Bearer <token>`
+   - 后端 `tokUser()` 同时支持 Cookie 和 Authorization header
+
+2. **全局请求日志**
+   - 日志格式：`[时间] [GLOBAL] 方法 路径 | host=xxx | origin=xxx | ua=xxx | ip=xxx`
+   - 非本地请求标记 `*** REMOTE ***`
+   - 启动诊断日志（node 版本、cwd、pid、auth.db 是否存在）
+   - 登录失败区分"用户不存在"和"密码错误"
+
+3. **密码修改 API** `POST /api/change-password`
+
+4. **HTTP 直通**
+   - 80 端口不再 301 到 HTTPS，直接代理到 Portal
+   - HTTPS 443 全部 302 重定向到 HTTP
+
+### 配置变更
+
+**Nginx `/etc/nginx/conf.d/openclaw.conf`：**
+- HTTP server: 取消 301 跳转，改为直接 proxy_pass 到 Portal
+- HTTPS server: 全部 return 302 到 HTTP（解决手机协议升级问题）
+
+**服务端 `server/index.js`：**
+- 新增 `LOG` 常量（info/warn/error/req 四种级别）
+- `tokUser()` 支持 Authorization header
+- 修复 login 路由的 if 语句花括号问题
+
+**前端 `client/src/stores/auth.js`：**
+- 改用 localStorage 存储 token
+- axios interceptor 自动附加 Bearer header
+
+### 移除
+
+- 后台管理中的网关令牌 Tab 全部功能
+
+### 部署
+
+```bash
+# 前端构建
+cd /root/.openclaw/workspace/auth-portal/client && npm run build
+
+# 服务端重启（pm2 管理）
+pm2 restart auth-portal
+
+# 日志查看
+pm2 logs auth-portal
+```
+
+### 已知问题
+
+1. 服务端为 ESM 模块，不能使用 `require()`
+2. 自签名证书在手机上首次访问需手动信任
