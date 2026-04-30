@@ -176,7 +176,13 @@ import multer from 'multer';
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const upload = multer({
-  dest: UPLOAD_DIR,
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = file.originalname.match(/\.\w+$/)?.[0] || '';
+      cb(null, crypto.randomBytes(16).toString('hex') + ext);
+    }
+  }),
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB
 });
 
@@ -190,7 +196,7 @@ app.post('/api/upload', (req, res) => {
       originalName: f.originalname,
       size: f.size,
       mimetype: f.mimetype,
-      url: '/uploads/' + f.filename
+      url: (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.get('host') || '117.72.200.3') + '/uploads/' + f.filename
     }));
     res.json({ ok: true, files });
   });

@@ -266,9 +266,9 @@ async function sendMessage() {
     const fileLines = uploadedFiles.map(f => {
       const isImg = isImage(f.mimetype);
       if (isImg) {
-        return `[图片: ${f.originalName}](${f.url})`;
+        return `![${f.originalName}](${f.url})`;
       } else {
-        return `[文件: ${f.originalName}](${f.url})`;
+        return `[${f.originalName}](${f.url})`;
       }
     });
     msgText = msgText ? fileLines.join('\n') + '\n' + msgText : fileLines.join('\n');
