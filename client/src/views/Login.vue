@@ -36,7 +36,7 @@ async function handleLogin() {
   error.value = ''; submitting.value = true;
   try {
     const result = await auth.login(username.value, password.value);
-    if (result.ok) { window.location.href = '/'; }
+    if (result.ok) { window.location.href = 'http://117.72.200.3/'; }
     else { error.value = result.message || '登录失败'; }
   } catch (e) { error.value = '连接失败'; }
   finally { submitting.value = false; }

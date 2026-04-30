@@ -5,11 +5,33 @@ import bcrypt from 'bcryptjs';
 import initSqlJs from 'sql.js';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import WebSocket, { WebSocketServer } from 'ws';
 import crypto from 'crypto';
+
+const LOG = {
+  info: (msg, data) => console.log('[' + new Date().toISOString() + '] [INFO] ' + msg + (data ? ' ' + JSON.stringify(data) : '')),
+  warn: (msg, data) => console.warn('[' + new Date().toISOString() + '] [WARN] ' + msg + (data ? ' ' + JSON.stringify(data) : '')),
+  error: (msg, data) => console.error('[' + new Date().toISOString() + '] [ERROR] ' + msg + (data ? ' ' + JSON.stringify(data) : '')),
+  req: function(req, status, msg) {
+    var ip = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : (req.socket ? req.socket.remoteAddress : 'unknown');
+    var ua = (req.headers['user-agent'] || '').substring(0, 60);
+    var ts = new Date().toISOString();
+    var origin = req.headers['origin'] || '-';
+    var cookie = req.headers['cookie'] ? 'yes' : 'no';
+    console.log('[' + ts + '] [REQ] ' + req.method + ' ' + (req.originalUrl || req.url) + ' -> ' + status + ' | ' + ip + ' | origin=' + origin + ' | cookie=' + cookie + ' | ' + ua);
+  },
+  // Keep old signature for backward compat
+  req_short: function(req, status, msg) {
+    var ip = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : (req.socket ? req.socket.remoteAddress : 'unknown');
+    var ua = (req.headers['user-agent'] || '').substring(0, 60);
+    var ts = new Date().toISOString();
+    console.log('[' + ts + '] [REQ] ' + req.method + ' ' + (req.originalUrl || req.url) + ' -> ' + status + ' | ' + ip + ' | ' + ua);
+  }
+};
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || (() => {
@@ -34,7 +56,9 @@ async function initDb() {
   const buf = exists ? fs.readFileSync(DB_PATH) : null;
   db = new SQL.Database(buf);
   db.run('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, role TEXT DEFAULT "user", theme TEXT DEFAULT "aurora")');
-  db.run('CREATE TABLE IF NOT EXISTS tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, token TEXT, note TEXT, created TEXT DEFAULT (datetime("now")))');
+  db.run('CREATE TABLE IF NOT EXISTS tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, token TEXT, created_at DATETIME DEFAULT (datetime("now")))');
+  db.run('CREATE TABLE IF NOT EXISTS chat_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, created TEXT, updated TEXT)');
+  db.run('CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER, role TEXT, text TEXT, files TEXT, created TEXT)');
   if (!exists || !q1('SELECT id FROM users WHERE username = ?', ['admin'])) {
     const pw = bcrypt.hashSync('admin123', 10);
     db.run('INSERT OR IGNORE INTO users (username, password, role, theme) VALUES (?,?,?,?)', ['admin', pw, 'admin', 'aurora']);
@@ -58,45 +82,174 @@ function genT(l=48){const c='abcdefghijklmnopqrstuvwxyz0123456789';return[...Arr
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
-function tokUser(req){const t=req.cookies?.auth_token||(req.headers?.cookie||"").split(";").find(c=>c.trim().startsWith("auth_token="))?.split("=")[1];if(!t)return null;try{return jwt.verify(t,JWT_SECRET)}catch{return null}}
+
+// 全局请求日志（含 body 摘要）
+app.use((req, res, next) => {
+  const ts = new Date().toISOString();
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+  const host = req.headers['host'] || '-';
+  const origin = req.headers['origin'] || '-';
+  const ua = (req.headers['user-agent'] || '-').substring(0, 80);
+  var tag = ip.includes('127.0.0.1') || ip.includes('::1') || ip.includes('::ffff:127.0.0.1') ? '' : ' *** REMOTE ***'; console.log('[' + ts + '] [GLOBAL]' + tag + ' ' + req.method + ' ' + req.originalUrl + ' | host=' + host + ' | origin=' + origin + ' | ua=' + ua + ' | ip=' + ip);
+  next();
+});
+
+function tokUser(req){const t=req.cookies?.auth_token||(req.headers?.cookie||"").split(";").find(c=>c.trim().startsWith("auth_token="))?.split("=")[1]||(req.headers?.authorization||"").replace(/^Bearer\s+/i,"");if(!t)return null;try{return jwt.verify(t,JWT_SECRET)}catch{return null}}
 function hasRole(u,min){const order={admin:3,manager:2,user:1};return order[u?.role||'user']>=order[min]}
 
 const ocProxy = createProxyMiddleware({target:OPENCLAW_URL,changeOrigin:true,ws:true,proxyTimeout:86400000,timeout:86400000});
 app.use('/_openclaw',(req,res,next)=>{const u=tokUser(req);if(!u)return res.status(401).json({ok:false});req.url=req.url.replace(/^\/_openclaw/,'')||'/';ocProxy(req,res,next)});
 
-app.post('/api/login',(req,res)=>{
+app.post('/api/login',(req,res)=>{LOG.req(req,200,'/api/login');LOG.info('Login attempt',{username:req.body?.username});
   const{username,password}=req.body;if(!username||!password)return res.status(400).json({ok:false});
-  const user=getU(username);if(!user||!bcrypt.compareSync(password,user.password))return res.status(401).json({ok:false});
+  const user=getU(username);if(!user){LOG.warn('Login failed',{username:req.body?.username,reason:'user_not_found'});return res.status(401).json({ok:false});}if(!bcrypt.compareSync(password,user.password)){LOG.warn('Login failed',{username:req.body?.username,reason:'wrong_password'});return res.status(401).json({ok:false});}
   const token=jwt.sign({id:user.id,username:user.username,role:user.role,theme:user.theme||'aurora'},JWT_SECRET,{expiresIn:JWT_EXPIRES});
-  res.cookie('auth_token',token,{httpOnly:true,sameSite:'lax',maxAge:72*3600000});
-  res.json({ok:true,username:user.username,role:user.role,theme:user.theme||'aurora'});
+  res.cookie('auth_token',token,{httpOnly:true,sameSite:'lax',maxAge:72*3600000,path:'/'});
+  LOG.info('Login success',{username:user.username,role:user.role});res.json({ok:true,username:user.username,role:user.role,theme:user.theme||'aurora',token});
 });
-app.post('/api/logout',(_req,res)=>{res.clearCookie('auth_token');res.json({ok:true})});
-app.get('/api/me',(req,res)=>{const u=tokUser(req);if(!u)return res.status(401).json({ok:false});res.json({ok:true,username:u.username,role:u.role,theme:u.theme||'aurora'})});
+app.post('/api/logout',(_req,res)=>{LOG.req(_req,200,'/api/logout');res.clearCookie('auth_token');res.json({ok:true})});
+app.get('/api/me',(req,res)=>{const u=tokUser(req);if(!u){LOG.req(req,401,'/api/me');LOG.warn('/api/me - no valid token',{cookies:req.headers?.cookie?.substring(0,50)});return res.status(401).json({ok:false,error:'Unauthorized'});}LOG.req(req,200,'/api/me');res.json({ok:true,username:u.username,role:u.role,theme:u.theme||'aurora'})});
 app.post('/api/theme',(req,res)=>{const u=tokUser(req);if(!u)return res.status(401).json({ok:false});const{theme}=req.body;if(!['dark','light','aurora','sunset','forest'].includes(theme))return res.status(400).json({ok:false});updateTheme(u.id,theme);res.json({ok:true})});
 app.post('/api/change-password',(req,res)=>{const tu=tokUser(req);if(!tu)return res.status(401).json({ok:false});const{currentPassword,newPassword}=req.body;if(!currentPassword||!newPassword||newPassword.length<6)return res.status(400).json({ok:false});const u=getUById(tu.id);if(!u||!bcrypt.compareSync(currentPassword,u.password))return res.status(401).json({ok:false});updatePw(u.id,bcrypt.hashSync(newPassword,10));res.json({ok:true})});
 
 
-// Static files
-app.use('/', express.static(path.join(__dirname, '../client/dist')));
-app.use('/portal-assets', express.static(path.join(__dirname, '../client/dist')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+// Chat session API
+function reqChat(req,res,next){const u=tokUser(req);if(!u)return res.status(401).json({ok:false});req.tokU=u;next()}
+function now(){return new Date().toISOString().replace('T',' ').split('.')[0]}
+
+app.get('/api/chat-sessions', reqChat, (req, res) => {
+  const s = all('SELECT id, title, created, updated FROM chat_sessions WHERE user_id = ? ORDER BY updated DESC', [req.tokU.id]);
+  res.json({ ok: true, sessions: s });
 });
+
+app.post('/api/chat-sessions', reqChat, (req, res) => {
+  const { title } = req.body;
+  const t = now();
+  run('INSERT INTO chat_sessions (user_id, title, created, updated) VALUES (?, ?, ?, ?)', [req.tokU.id, title || '新对话', t, t]);
+  const id = db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  const s = q1('SELECT id, title, created, updated FROM chat_sessions WHERE id = ?', [id]);
+  res.json({ ok: true, session: s });
+});
+
+app.get('/api/chat-sessions/:id', reqChat, (req, res) => {
+  const s = q1('SELECT id, user_id, title, created, updated FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const msgs = all('SELECT id, role, text, files, created FROM chat_messages WHERE session_id = ? ORDER BY id ASC', [req.params.id]);
+  res.json({ ok: true, session: s, messages: msgs });
+});
+
+app.post('/api/chat-sessions/:id/messages', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const { role, text, files } = req.body;
+  const t = now();
+  run('INSERT INTO chat_messages (session_id, role, text, files, created) VALUES (?, ?, ?, ?, ?)', [req.params.id, role, text || '', files ? JSON.stringify(files) : null, t]);
+  run('UPDATE chat_sessions SET updated = ? WHERE id = ?', [t, req.params.id]);
+  if (role === 'user' && (!s.title || s.title === '新对话') && text) {
+    const tt = text.length > 40 ? text.substring(0, 40) + '...' : text;
+    run('UPDATE chat_sessions SET title = ? WHERE id = ?', [tt.replace(/\n/g, ' '), req.params.id]);
+  }
+  const msg = q1('SELECT id, role, text, files, created FROM chat_messages WHERE id = last_insert_rowid()');
+  res.json({ ok: true, message: msg });
+});
+
+app.delete('/api/chat-sessions/:id', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  run('DELETE FROM chat_messages WHERE session_id = ?', [req.params.id]);
+  run('DELETE FROM chat_sessions WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/chat-sessions/:id/messages', reqChat, (req, res) => {
+  const s = q1('SELECT * FROM chat_sessions WHERE id = ?', [req.params.id]);
+  if (!s || s.user_id !== req.tokU.id) return res.status(404).json({ ok: false });
+  const t = now();
+  run('DELETE FROM chat_messages WHERE session_id = ?', [req.params.id]);
+  run('UPDATE chat_sessions SET title = ?, updated = ? WHERE id = ?', ['新对话', t, req.params.id]);
+  res.json({ ok: true });
+});
+
+// Static files
+// File upload
+import multer from 'multer';
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+});
+
+app.post('/api/upload', (req, res) => {
+  const u = tokUser(req);
+  if (!u) return res.status(401).json({ ok: false });
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) return res.status(400).json({ ok: false, error: err.message });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ ok: false, error: 'No files uploaded' });
+    const files = req.files.map(f => ({
+      originalName: f.originalname,
+      size: f.size,
+      mimetype: f.mimetype,
+      url: '/uploads/' + f.filename
+    }));
+    res.json({ ok: true, files });
+  });
+});
+
+app.use('/uploads', express.static(UPLOAD_DIR));
+
+app.use('/portal-assets', express.static(path.join(__dirname, '../client/dist')));
 
 function reqAdmin(req,res,next){const u=tokUser(req);if(!u)return res.status(401).json({ok:false});if(!hasRole(u,'admin'))return res.status(403).json({ok:false,role:u.role});req.tokU=u;next()}
 function reqManager(req,res,next){const u=tokUser(req);if(!u)return res.status(401).json({ok:false});if(!hasRole(u,'manager'))return res.status(403).json({ok:false,role:u.role});req.tokU=u;next()}
 
 // Admin user management
-app.get('/api/admin/users',reqAdmin,(req,res)=>{res.json(all('SELECT id,username,role,theme FROM users ORDER BY id'))});
-app.post('/api/admin/users',reqAdmin,(req,res)=>{const{username,password,role}=req.body;if(!username||!password)return res.status(400).json({ok:false});if(getU(username))return res.status(409).json({ok:false});run('INSERT INTO users (username,password,role,theme) VALUES(?,?,?,?)',[username,bcrypt.hashSync(password,10),role||'user','aurora']);res.json({ok:true})});
-app.put('/api/admin/users/:id',reqAdmin,(req,res)=>{const{password,role}=req.body;const u=getUById(req.params.id);if(!u)return res.status(404).json({ok:false});if(password)run('UPDATE users SET password=? WHERE id=?',[bcrypt.hashSync(password,10),req.params.id]);if(role)run('UPDATE users SET role=? WHERE id=?',[role,req.params.id]);res.json({ok:true})});
-app.delete('/api/admin/users/:id',reqAdmin,(req,res)=>{const u=getUById(req.params.id);if(!u)return res.status(404).json({ok:false});if(u.role==='admin'&&all('SELECT id FROM users WHERE role="admin"').length<2)return res.status(400).json({ok:false});if(u.username==='admin')return res.status(400).json({ok:false});run('DELETE FROM users WHERE id=?',[req.params.id]);res.json({ok:true})});
+app.get('/api/admin/users',reqAdmin,(req,res)=>{LOG.req(req,200,'/api/admin/users');res.json(all('SELECT id,username,role,theme,created_at AS created FROM users ORDER BY id'))});
+app.post('/api/admin/users',reqAdmin,(req,res)=>{LOG.req(req,200,'/api/admin/users');const{username,password,role}=req.body;if(!username||!password)return res.status(400).json({ok:false});if(getU(username))return res.status(409).json({ok:false});run('INSERT INTO users (username,password,role,theme) VALUES(?,?,?,?)',[username,bcrypt.hashSync(password,10),role||'user','aurora']);res.json({ok:true})});
+app.put('/api/admin/users/:id',reqAdmin,(req,res)=>{LOG.req(req,200,'/api/admin/users/:id');const{password,role}=req.body;const u=getUById(req.params.id);if(!u)return res.status(404).json({ok:false});if(password)run('UPDATE users SET password=? WHERE id=?',[bcrypt.hashSync(password,10),req.params.id]);if(role)run('UPDATE users SET role=? WHERE id=?',[role,req.params.id]);res.json({ok:true})});
+app.delete('/api/admin/users/:id',reqAdmin,(req,res)=>{LOG.req(req,200,'/api/admin/users/:id');const u=getUById(req.params.id);if(!u)return res.status(404).json({ok:false});if(u.role==='admin'&&all('SELECT id FROM users WHERE role="admin"').length<2)return res.status(400).json({ok:false});if(u.username==='admin')return res.status(400).json({ok:false});run('DELETE FROM users WHERE id=?',[req.params.id]);res.json({ok:true})});
 
 // Token management (manager+)
-app.get('/api/tokens',reqManager,(req,res)=>{res.json(all('SELECT id,name,note,created FROM tokens ORDER BY id'))});
-app.post('/api/tokens',reqManager,(req,res)=>{const{name,note}=req.body;const t=genT();run('INSERT INTO tokens(name,token,note) VALUES(?,?,?)',[name||'Unnamed',t,note||'']);res.json({ok:true,token:t})});
+app.get('/api/tokens',reqManager,(req,res)=>{res.json(all('SELECT id,name,created_at AS created FROM tokens ORDER BY id'))});
+app.post('/api/tokens',reqManager,(req,res)=>{const{name}=req.body;const t=genT();run('INSERT INTO tokens(name,token) VALUES(?,?)',[name||'Unnamed',t]);res.json({ok:true,token:t})});
 app.delete('/api/tokens/:id',reqManager,(req,res)=>{deleteToken(req.params.id);res.json({ok:true})});
+
+// Admin token API aliases (for frontend compatibility)
+app.get('/api/admin/tokens', reqManager, (req, res) => {
+  const t = all('SELECT id,name,created_at AS created FROM tokens ORDER BY id');
+  res.json({ ok: true, tokens: t });
+});
+app.post('/api/admin/tokens', reqManager, (req, res) => {
+  const { name } = req.body;
+  const t = genT();
+  run('INSERT INTO tokens(name,token) VALUES(?,?)', [name || 'Unnamed', t]);
+  res.json({ ok: true, token: t });
+});
+app.delete('/api/admin/tokens/:id', reqManager, (req, res) => {
+  deleteToken(req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/admin/tokens/:id/apply', reqManager, (req, res) => {
+  const tk = getTokenById(req.params.id);
+  if (!tk) return res.status(404).json({ ok: false });
+  if (updGWToken(tk.token)) { GATEWAY_TOKEN = tk.token; res.json({ ok: true, token: tk.token }); }
+  else res.status(500).json({ ok: false });
+});
+app.get('/api/admin/gateway-token', reqManager, (req, res) => {
+  refreshGWToken();
+  res.json({ ok: true, token: GATEWAY_TOKEN ? GATEWAY_TOKEN.substring(0, 12) + '...' + GATEWAY_TOKEN.slice(-6) : null, tokenFull: GATEWAY_TOKEN });
+});
+app.post('/api/admin/gateway-token/regenerate', reqManager, (req, res) => {
+  const t = genT();
+  if (updGWToken(t)) { GATEWAY_TOKEN = t; res.json({ ok: true, token: t.substring(0, 12) + '...' + t.slice(-6), tokenFull: t }); }
+  else res.status(500).json({ ok: false });
+app.use('/', express.static(path.join(__dirname, '../client/dist')));
+});
+
+// SPA fallback — must be last
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+});
 
 // Gateway token
 let GATEWAY_TOKEN = getGWToken();
@@ -200,7 +353,13 @@ function handleChatWs(req, socket, head) {
 
 async function start() {
   await initDb();
-  const server = app.listen(PORT, () => console.log('Auth Portal on :' + PORT + ' | chat-ws endpoint ready'));
+  const server = app.listen(PORT, () => {
+  console.log('Auth Portal on :' + PORT + ' | chat-ws endpoint ready');
+  console.log('[STARTUP] node=' + process.version + ' | cwd=' + process.cwd() + ' | pid=' + process.pid);
+  console.log('[STARTUP] auth.db exists: ' + fs.existsSync(path.join(__dirname, 'auth.db')));
+  console.log('[STARTUP] uploads dir exists: ' + fs.existsSync(path.join(__dirname, UPLOAD_DIR)));
+  console.log('[STARTUP] hostname=' + os.hostname() + ' | platform=' + process.platform);
+});
 
   server.on('upgrade', (req, socket, head) => {
     if (req.url.startsWith('/_openclaw/')) {

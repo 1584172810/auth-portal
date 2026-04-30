@@ -74,6 +74,48 @@
         </div>
       </div>
 
+      <!-- 🔑 网关令牌 -->
+      <div v-if="tab === 'tokens'" class="tab-content">
+        <div class="card">
+          <div class="card-header"><h2>当前网关令牌</h2></div>
+          <p class="desc">正在被 OpenClaw Gateway 使用的活跃令牌。</p>
+          <div class="token-display">
+            <code class="token-value">{{ activeToken || '加载中…' }}</code>
+          </div>
+          <div class="token-actions">
+            <button class="btn-sm btn-primary" @click="copy(activeToken)" :disabled="!activeToken">{{ copied === 'active' ? '已复制' : '📋 复制' }}</button>
+            <button v-if="isManager" class="btn-sm btn-danger" @click="regenerateActive" :disabled="regenerating">{{ regenerating ? '生成中…' : '🔄 重新生成' }}</button>
+          </div>
+          <div v-if="isManager" class="warning">⚠️ 修改活跃令牌会断开当前所有连接的设备。</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>令牌库</h2>
+            <button v-if="isManager" class="btn-sm btn-primary" @click="showAddToken = true">+ 新建令牌</button>
+          </div>
+          <div v-if="showAddToken && isManager" class="form-inline">
+            <input v-model="newTokenName" placeholder="令牌名称" class="input-sm" />
+            <button class="btn-sm btn-primary" @click="createToken" :disabled="tokenCreating">{{ tokenCreating ? '创建中…' : '创建' }}</button>
+            <button class="btn-sm btn-ghost" @click="showAddToken = false">取消</button>
+          </div>
+          <p v-if="tokenMsg" :class="tokenMsgType" class="msg">{{ tokenMsg }}</p>
+          <div v-if="tokens.length === 0" class="empty-state">暂无保存的令牌</div>
+          <div v-for="tk in tokens" :key="tk.id" class="token-card">
+            <div class="token-info">
+              <span class="token-name">{{ tk.name }}</span>
+              <span class="token-date">{{ tk.created_at }}</span>
+            </div>
+            <code class="token-code">{{ tk.token.substring(0, 12) }}…{{ tk.token.slice(-6) }}</code>
+            <div class="token-card-actions">
+              <button class="btn-sm btn-primary" @click="copy(tk.token)">{{ copied === 't_' + tk.id ? '已复制' : '📋 复制' }}</button>
+              <button v-if="isManager" class="btn-sm btn-success" @click="applyToken(tk)" :disabled="applying === tk.id">{{ applying === tk.id ? '应用中…' : '✅ 设为当前' }}</button>
+              <button v-if="isManager" class="btn-sm btn-danger" @click="deleteToken(tk)">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 📱 设备管理 -->
       <DeviceManager :tab="tab" />
     </div>
@@ -110,7 +152,6 @@ onMounted(async () => {
     auth.role = res.data.role;
     auth.applyTheme(res.data.theme || 'aurora');
     if (!auth.hasAccess('manager')) { window.location.href = '/'; return; }
-    loadUsers();
   } catch { window.location.href = '/login'; }
 });
 
@@ -120,8 +161,9 @@ async function deleteUser(u) { if (!confirm('删除用户 ' + u.username + '？'
 function resetPw(u) { resetTarget.value = u; resetPwVal.value = ''; }
 async function doResetPw() { if (!resetPwVal.value || resetPwVal.value.length < 6) return; try { await api.post('/api/admin/users/' + resetTarget.value.id + '/reset-password', { password: resetPwVal.value }); userMsg.value = '密码已重置'; userMsgType.value = 'success'; resetTarget.value = null; } catch (e) { userMsg.value = e.response?.data?.message || '失败'; userMsgType.value = 'error'; } }
 async function changeRole(u) { try { await api.post('/api/admin/users/' + u.id + '/role', { role: u.role }); userMsg.value = '角色已更新'; userMsgType.value = 'success'; } catch { userMsg.value = '更新失败'; userMsgType.value = 'error'; } }
-async function copy(val) { if (!val) return; try { await navigator.clipboard.writeText(val); } catch { const ta = document.createElement('textarea'); ta.value = val; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } }
-
+async function copy(val) { if (!val) return; try { await navigator.clipboard.writeText(val); } catch { const ta = document.createElement('textarea'); ta.value = val; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } copied.value = val; setTimeout(() => copied.value = '', 2000); }
+ finally { regenerating.value = false; } }
+ finally { applying.value = null; } }
 async function handleLogout() { await auth.logout(); window.location.href = '/'; }
 </script>
 
@@ -175,6 +217,17 @@ select.input-sm { cursor: pointer; min-width: 100px; }
 .btn-ghost:hover { background: var(--card-bg); }
 .msg { font-size: 13px; margin: 0 0 12px; }
 .error { color: var(--danger); } .success { color: var(--success); }
+.token-display { margin: 16px 0; }
+.token-value { display: block; background: var(--input-bg); padding: 14px 16px; border-radius: 10px; font-family: 'SF Mono','Fira Code',monospace; font-size: 13px; color: var(--success); word-break: break-all; border: 1px solid var(--input-border); }
+.token-actions { display: flex; gap: 8px; margin: 16px 0; }
+.warning { background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.2); border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--warning); }
+.token-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--card-border); border-radius: 12px; margin-bottom: 10px; background: rgba(255,255,255,0.02); }
+.token-card:hover { background: rgba(255,255,255,0.04); }
+.token-info { flex: 1; min-width: 120px; }
+.token-name { color: var(--text-primary); font-size: 14px; font-weight: 600; display: block; }
+.token-date { color: var(--text-muted); font-size: 11px; }
+.token-code { font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; color: var(--text-secondary); background: var(--input-bg); padding: 6px 10px; border-radius: 6px; }
+.token-card-actions { display: flex; gap: 6px; }
 .modal-overlay { position: fixed; inset: 0; background: var(--modal-overlay); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 24px; width: 360px; max-width: 90vw; box-shadow: var(--card-shadow); }
 .modal h3 { color: var(--text-primary); margin: 0 0 16px; font-size: 16px; }
